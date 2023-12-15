@@ -13,6 +13,9 @@
 		EA4B7CC32B29776B007FA525 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = EA4B7CC12B29776B007FA525 /* Main.storyboard */; };
 		EA4B7CC52B29776D007FA525 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EA4B7CC42B29776D007FA525 /* Assets.xcassets */; };
 		EA4B7CC82B29776D007FA525 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = EA4B7CC62B29776D007FA525 /* LaunchScreen.storyboard */; };
+		EA4B7CD02B29848E007FA525 /* UploadData.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4B7CCF2B29848E007FA525 /* UploadData.swift */; };
+		EA4B7CD22B2984B8007FA525 /* UploadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4B7CD12B2984B8007FA525 /* UploadManager.swift */; };
+		EA4B7CD42B29B531007FA525 /* APIManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4B7CD32B29B531007FA525 /* APIManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,6 +27,9 @@
 		EA4B7CC42B29776D007FA525 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		EA4B7CC72B29776D007FA525 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		EA4B7CC92B29776D007FA525 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		EA4B7CCF2B29848E007FA525 /* UploadData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadData.swift; sourceTree = "<group>"; };
+		EA4B7CD12B2984B8007FA525 /* UploadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadManager.swift; sourceTree = "<group>"; };
+		EA4B7CD32B29B531007FA525 /* APIManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +65,9 @@
 				EA4B7CBB2B29776B007FA525 /* AppDelegate.swift */,
 				EA4B7CBD2B29776B007FA525 /* SceneDelegate.swift */,
 				EA4B7CBF2B29776B007FA525 /* ViewController.swift */,
+				EA4B7CD32B29B531007FA525 /* APIManager.swift */,
+				EA4B7CD12B2984B8007FA525 /* UploadManager.swift */,
+				EA4B7CCF2B29848E007FA525 /* UploadData.swift */,
 				EA4B7CC12B29776B007FA525 /* Main.storyboard */,
 				EA4B7CC42B29776D007FA525 /* Assets.xcassets */,
 				EA4B7CC62B29776D007FA525 /* LaunchScreen.storyboard */,
@@ -138,8 +147,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EA4B7CD42B29B531007FA525 /* APIManager.swift in Sources */,
 				EA4B7CC02B29776B007FA525 /* ViewController.swift in Sources */,
 				EA4B7CBC2B29776B007FA525 /* AppDelegate.swift in Sources */,
+				EA4B7CD02B29848E007FA525 /* UploadData.swift in Sources */,
+				EA4B7CD22B2984B8007FA525 /* UploadManager.swift in Sources */,
 				EA4B7CBE2B29776B007FA525 /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
