@@ -21,6 +21,7 @@ class ViewController: UIViewController {
         uploadManager = UploadManager()
         NotificationCenter.default.addObserver(self, selector: #selector(appMovedToBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
 
+
         // Do any additional setup after loading the view.
     }
     
@@ -59,7 +60,7 @@ class ViewController: UIViewController {
                 switch result {
                 case .success(_):
                     print("Success")
-                    self.scheduleSimpleNotification(identifier: uniqueFileName)
+//                    self.scheduleSimpleNotification(identifier: uniqueFileName)
                 case .failure(_):
                     print("Failure")
                 }
