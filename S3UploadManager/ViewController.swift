@@ -56,7 +56,7 @@ class ViewController: UIViewController {
             try data.write(to: tempURL)
             let mimeType = getMimeType(for: tempURL)
             
-            uploadManager.createMultipartUpload(name: uniqueFileName, mimeType: mimeType ) {result in
+            uploadManager.createMultipartUpload(name: uniqueFileName, mimeType: mimeType, mediaUrl: tempURL) {result in
                 switch result {
                 case .success(_):
                     print("Success")

@@ -4,7 +4,6 @@
 //
 //  Created by Kumar Aman on 13/12/23.
 //
-
 import Foundation
 import UserNotifications
 
@@ -27,8 +26,17 @@ struct Part: Encodable {
     let ETag: String
 }
 
+struct UploadData {
+    var fileKey: String?
+    var uploadId: String?
+    var mediaUrl: URL?
+    var mimeType: String?
+    var eTag: String?
+}
+
 class UploadManager: NSObject {
     static let shared = UploadManager()
+    var uploadData = UploadData(fileKey: nil, uploadId: nil, mediaUrl: nil, mimeType: nil, eTag: nil)
     private var completionHandlers: [UploadTaskType: [Int: (Result<Data, Error>) -> Void]] = [:]
     private var taskInfoMap = [Int: Data]()
     
@@ -36,8 +44,8 @@ class UploadManager: NSObject {
     private var isUploading = false
     
     private lazy var backgroundSession: URLSession = {
-        let config = URLSessionConfiguration.background(withIdentifier: "com.xtractor.S3UploadManager")
-        config.isDiscretionary = true
+        let config = URLSessionConfiguration.default
+//        config.isDiscretionary = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
 
@@ -54,10 +62,10 @@ class UploadManager: NSObject {
         }
     }
 
-    func createMultipartUpload(name: String, mimeType: String, completion: @escaping (Result<CreateMultipartUploadResponse, Error>) -> Void) {
+    func createMultipartUpload(name: String, mimeType: String, mediaUrl: URL, completion: @escaping (Result<CreateMultipartUploadResponse, Error>) -> Void) {
         // Add task to the queue
         uploadQueue.append { [weak self] in
-            self?.performCreateMultipartUpload(name: name, mimeType: mimeType, completion: completion)
+            self?.performCreateMultipartUpload(name: name, mimeType: mimeType, mediaUrl: mediaUrl)
         }
         
         // Try to start the next task
@@ -109,18 +117,11 @@ class UploadManager: NSObject {
     }
     
     func uploadMedia(to preSignedUrl: URL, fileURL: URL, mimeType: String, completion: @escaping (Result<String?, Error>) -> Void) {
-        do {
-            let fileData = try Data(contentsOf: fileURL)
-            guard let tempFileURL = writeDataToTempFile(data: fileData) else {
-                completion(.failure(URLError(.cannotCreateFile)))
-                return
-            }
-
             var request = URLRequest(url: preSignedUrl)
             request.httpMethod = "PUT"
             request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
 
-            let task = backgroundSession.uploadTask(with: request, fromFile: tempFileURL)
+            let task = backgroundSession.uploadTask(with: request, fromFile: fileURL)
             completionHandlers[.uploadMedia, default: [:]][task.taskIdentifier] = { [weak self] result in
                 switch result {
                 case .success(_):
@@ -141,25 +142,23 @@ class UploadManager: NSObject {
                 // Cleanup
                 self?.taskInfoMap.removeValue(forKey: task.taskIdentifier)
             }
-            taskInfoMap[task.taskIdentifier] = fileData
             task.resume()
-        } catch {
-            completion(.failure(error))
-        }
     }
     
-    private func performCreateMultipartUpload(name: String, mimeType: String, completion: @escaping (Result<CreateMultipartUploadResponse, Error>) -> Void) {
+    private func performCreateMultipartUpload(name: String, mimeType: String, mediaUrl: URL) {
         // Existing createMultipartUpload logic here
         guard let url = URL(string: "http://13.57.38.104:8080/uploads/createMultipartUpload") else {
-            completion(.failure(URLError(.badURL)))
             return
         }
-
+        
+        self.uploadData.fileKey = name
+        self.uploadData.mediaUrl = mediaUrl
+        self.uploadData.mimeType = mimeType
+    
         let uploadData = ["name": name, "mimeType": mimeType]
         do {
             let jsonData = try JSONSerialization.data(withJSONObject: uploadData, options: [])
             guard let fileURL = writeDataToTempFile(data: jsonData) else {
-                completion(.failure(URLError(.cannotCreateFile)))
                 return
             }
 
@@ -170,53 +169,14 @@ class UploadManager: NSObject {
             let task = backgroundSession.uploadTask(with: request, fromFile: fileURL)
             completionHandlers[.createMultipartUpload, default: [:]][task.taskIdentifier] = { result in
                 switch result {
-                case .success(let data):
-                    do {
-                        let response = try JSONDecoder().decode(CreateMultipartUploadResponse.self, from: data)
-                        self.getMultipartPreSignedUrls(fileKey: name, uploadId: response.uploadId, parts: 1){presignedResult in
-                            switch presignedResult {
-                            case .success(let presignedResponse):
-                                guard let preSignedUrlString = presignedResponse.parts.first?.signedUrl,
-                                      let preSignedUrl = URL(string: preSignedUrlString) else {
-                                    return
-                                }
-                                self.uploadMedia(to: preSignedUrl, fileURL: fileURL, mimeType: mimeType){ uploadResult in
-                                    switch uploadResult {
-                                    case .success(let etag):
-                                        if let unwrappedEtag = etag {
-                                            print("Etag: \(unwrappedEtag)")
-                                            let parts = [Part(PartNumber: 1, ETag: unwrappedEtag.trimmingCharacters(in: CharacterSet(charactersIn: "\"")))]
-                                            print("Part: \(parts)")
-                                            self.completeMultipartUpload(fileKey: name, uploadId: response.uploadId, parts: parts) { result in
-                                                switch result {
-                                                case .success(_):
-                                                    print("Multipart Complete!")
-                                                    self.scheduleSimpleNotification(identifier: name)
-                                                case .failure(_):
-                                                    print("Multipart Failed!")
-                                                }
-                                            }
-                                            print("Upload Success!")
-                                        }
-                                    case .failure(_):
-                                        print("UploadError!")
-                                    }
-                                }
-                            case .failure(_):
-                                print("Error")
-                            }
-                        }
-                        completion(.success(response))
-                    } catch {
-                        completion(.failure(error))
-                    }
+                case .success(_):
+                    print("CreateMultipartSuccess!")
                 case .failure(let error):
-                    completion(.failure(error))
+                    print("CreateMultiPartFailure: \(error.localizedDescription)")
                 }
             }
             task.resume()
         } catch {
-            completion(.failure(error))
         }
     }
     
@@ -299,14 +259,20 @@ extension UploadManager: URLSessionTaskDelegate {
                     completion(.failure(error))
                 } else if let httpResponse = task.response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                     let responseData = taskInfoMap[task.taskIdentifier] ?? Data()
+                    // Convert responseData to a String to print it
+
                     // Handle successful task completion
                     switch taskType {
+                        
                     case .createMultipartUpload:
-                        print("CreateMultipart Success!")
+                        handleCreateMultipartUploadResponse(httpResponse, data: responseData)
+        
                     case .getMultipartPreSignedUrls:
-                        print("GetMultipartPresigned Success!")
+                        handleGetMultipartPreSignedUrlsResponse(httpResponse, data: responseData)
+                        
                     case .uploadMedia:
-                        print("UploadComplete!")
+                        handleUploadMediaResponse(httpResponse, data: responseData)
+                        
                     case .completeMultipartUpload:
                         // After handling completion
                         DispatchQueue.main.async { [weak self] in
@@ -325,6 +291,66 @@ extension UploadManager: URLSessionTaskDelegate {
                 taskInfoMap.removeValue(forKey: task.taskIdentifier)
             }
         }
+    
+    private func handleCreateMultipartUploadResponse(_ response: HTTPURLResponse, data: Data) {
+        // Process the data and httpResponse as needed for createMultipartUpload
+        do {
+            let response = try JSONDecoder().decode(CreateMultipartUploadResponse.self, from: data)
+            self.uploadData.uploadId = response.uploadId
+            self.getMultipartPreSignedUrls(fileKey: response.fileKey, uploadId: response.uploadId, parts: 1) { response in
+                switch response {
+                case .success(_):
+                    print("PresignedSuccess")
+                case .failure(let error):
+                    print(error.localizedDescription)
+                }
+            }
+        } catch {
+            print("error")
+        }
+    }
+
+    private func handleGetMultipartPreSignedUrlsResponse(_ response: HTTPURLResponse, data: Data) {
+        // Process the data and httpResponse as needed for getMultipartPreSignedUrls
+        do {
+            let response = try JSONDecoder().decode(PreSignedURLResponse.self, from: data)
+            guard let preSignedUrlString = response.parts.first?.signedUrl,
+                  let preSignedUrl = URL(string: preSignedUrlString) else {
+                return
+            }
+
+            self.uploadMedia(to: preSignedUrl, fileURL: self.uploadData.mediaUrl!, mimeType: self.uploadData.mimeType!) { response in
+                switch response {
+                case .success(let etag):
+                    self.uploadData.eTag = etag!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    print("UploadSuccess")
+                case .failure(let error):
+                    print(error.localizedDescription)
+                }
+            }
+        } catch {
+            
+        }
+    }
+
+    private func handleUploadMediaResponse(_ response: HTTPURLResponse, data: Data) {
+        // Process the data and httpResponse as needed for uploadMedia
+            self.uploadData.eTag = (response.allHeaderFields["Etag"] as? String)!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+
+            let parts = [Part(PartNumber: 1, ETag: self.uploadData.eTag!)]
+            self.completeMultipartUpload(fileKey: self.uploadData.fileKey!, uploadId: self.uploadData.uploadId!, parts: parts){ response in
+                switch response {
+                case .success(_):
+                    print("MultiPart Success")
+                case .failure(let error):
+                    print("Error: \(error.localizedDescription)")
+                }
+            }
+    }
+
+    private func handleCompleteMultipartUploadResponse(_ response: HTTPURLResponse, data: Data, completion: (Result<Data, Error>) -> Void) {
+        // Process the data and httpResponse as needed for completeMultipartUpload
+    }
     
     func getTaskType(from task: URLSessionTask) -> UploadTaskType? {
         guard let url = task.originalRequest?.url else { return nil }
