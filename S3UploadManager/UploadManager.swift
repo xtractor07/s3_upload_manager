@@ -6,33 +6,7 @@
 //
 import Foundation
 import UserNotifications
-
-enum UploadTaskType {
-    case createMultipartUpload
-    case getMultipartPreSignedUrls
-    case uploadMedia
-    case completeMultipartUpload
-    // Add more task types as needed
-}
-
-struct CompleteUploadRequest: Encodable {
-    let fileKey: String
-    let UploadId: String
-    let parts: [Part]
-}
-
-struct Part: Encodable {
-    let PartNumber: Int
-    let ETag: String
-}
-
-struct UploadData {
-    var fileKey: String?
-    var uploadId: String?
-    var mediaUrl: URL?
-    var mimeType: String?
-    var eTag: String?
-}
+import UIKit
 
 class UploadManager: NSObject {
     static let shared = UploadManager()
@@ -42,6 +16,15 @@ class UploadManager: NSObject {
     
     private var uploadQueue: [() -> Void] = []
     private var isUploading = false
+    private var currentUploadTask: URLSessionUploadTask?
+    private var currentUploadRequest: URLRequest?
+    private var currentUploadFileURL: URL?
+    private var currentUploadCompletionHandler: ((Result<String?, Error>) -> Void)?
+    
+    override init() {
+        super.init()
+        setupNotificationObservers()
+    }
     
     private lazy var backgroundSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -142,6 +125,11 @@ class UploadManager: NSObject {
                 // Cleanup
                 self?.taskInfoMap.removeValue(forKey: task.taskIdentifier)
             }
+            
+            currentUploadTask = task
+            currentUploadRequest = request
+            currentUploadFileURL = fileURL
+            currentUploadCompletionHandler = completion
             task.resume()
     }
     
@@ -243,7 +231,6 @@ class UploadManager: NSObject {
             }
         }
     }
-
 }
 
 // URLSession Delegate Methods
@@ -380,7 +367,97 @@ extension UploadManager: URLSessionDataDelegate {
     }
 }
 
+extension UploadManager {
+    private func setupNotificationObservers() {
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidEnterBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidEnterForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+    
+    
+    @objc private func appDidEnterBackground() {
+        // Handle transition to background
+        switchToBackgroundSession()
+        restartCurrentUpload()
+    }
 
+    @objc private func appDidEnterForeground() {
+        // Handle transition to foreground
+        switchToForegroundSession()
+        restartCurrentUpload()
+    }
+}
+
+extension UploadManager {
+    private func switchToBackgroundSession() {
+        // Switch to a URLSession configured for background tasks
+        cancelCurrentUploadTask()
+        initializeSession(forBackground: true)
+        print("App moved to background")
+        restartCurrentUpload()
+    }
+
+    private func switchToForegroundSession() {
+        // Switch to a URLSession configured for foreground tasks
+        cancelCurrentUploadTask()
+        initializeSession(forBackground: false)
+        print("App moved to foreground")
+        restartCurrentUpload()
+    }
+}
+
+extension UploadManager {
+    
+    func initializeSession(forBackground background: Bool) {
+        let config = background ? createBackgroundSessionConfiguration() : createForegroundSessionConfiguration()
+        backgroundSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        // Optionally, restart or resume pending uploads here
+    }
+    
+    private func createForegroundSessionConfiguration() -> URLSessionConfiguration {
+        // Use default configuration for foreground
+        return URLSessionConfiguration.default
+    }
+
+    private func createBackgroundSessionConfiguration() -> URLSessionConfiguration {
+        // Use background configuration for background tasks
+        let config = URLSessionConfiguration.background(withIdentifier: "com.xtractor.S3UploadManager")
+        // Set additional properties if needed
+        return config
+    }
+    
+    private func cancelCurrentUploadTask() {
+        currentUploadTask?.cancel()
+        currentUploadTask = nil
+    }
+    
+    func restartCurrentUpload() {
+            guard let request = currentUploadRequest, let fileURL = currentUploadFileURL else {
+                print("No current upload to restart.")
+                return
+            }
+
+            // Create a new task with the same request and file URL
+            let newTask = backgroundSession.uploadTask(with: request, fromFile: fileURL)
+            completionHandlers[.uploadMedia, default: [:]][newTask.taskIdentifier] = { [weak self] result in
+                switch result {
+                case .success(_):
+                    // Assuming the response data contains the ETag or similar information
+                    if let httpResponse = newTask.response as? HTTPURLResponse, 200...299 ~= httpResponse.statusCode {
+                        let etag = httpResponse.allHeaderFields["Etag"] as? String
+                        self?.currentUploadCompletionHandler?(.success(etag))
+                    } else {
+                        self?.currentUploadCompletionHandler?(.failure(URLError(.badServerResponse)))
+                    }
+                case .failure(let error):
+                    self?.currentUploadCompletionHandler?(.failure(error))
+                }
+            }
+            
+//             Update the current upload task reference and resume
+            currentUploadTask = newTask
+            newTask.resume()
+    }
+}
 
 
 

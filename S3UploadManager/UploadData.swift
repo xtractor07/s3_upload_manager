@@ -30,3 +30,30 @@ struct PreSignedURLResponse: Codable {
 
     let parts: [Part]
 }
+
+enum UploadTaskType {
+    case createMultipartUpload
+    case getMultipartPreSignedUrls
+    case uploadMedia
+    case completeMultipartUpload
+    // Add more task types as needed
+}
+
+struct CompleteUploadRequest: Encodable {
+    let fileKey: String
+    let UploadId: String
+    let parts: [Part]
+}
+
+struct Part: Encodable {
+    let PartNumber: Int
+    let ETag: String
+}
+
+struct UploadData {
+    var fileKey: String?
+    var uploadId: String?
+    var mediaUrl: URL?
+    var mimeType: String?
+    var eTag: String?
+}
