@@ -9,16 +9,18 @@ import UIKit
 import PhotosUI
 import UserNotifications
 
-class ViewController: UIViewController {
+class ViewController: UIViewController, UploadManagerDelegate {
     
-    var uploadManager: UploadManager!
+//    var uploadManager: UploadManager!
     @IBOutlet weak var selectMediaBtn: UIButton!
     @IBOutlet weak var uploadStatusBtn: UIButton!
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-
+    @IBOutlet weak var progressBar: UIProgressView!
+    
     override func viewDidLoad() {
         super.viewDidLoad()
-        uploadManager = UploadManager()
+        UploadManager.shared.delegate = self
+//        uploadManager = UploadManager()
         NotificationCenter.default.addObserver(self, selector: #selector(appMovedToBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
 
 
@@ -26,7 +28,15 @@ class ViewController: UIViewController {
     }
     
     @IBAction func selectMediaDidPressed(_ sender: UIButton) {
+        self.progressBar.progress = 0.0
         presentImageAndVideoPicker()
+    }
+    
+    func uploadManager(_ manager: UploadManager, didUpdateProgress progress: Float) {
+        DispatchQueue.main.async {
+            print("Progress: \(progress)")
+            self.progressBar.progress = progress
+        }
     }
     
     func presentImageAndVideoPicker() {
@@ -56,11 +66,11 @@ class ViewController: UIViewController {
             try data.write(to: tempURL)
             let mimeType = getMimeType(for: tempURL)
             
-            uploadManager.createMultipartUpload(name: uniqueFileName, mimeType: mimeType, mediaUrl: tempURL) {result in
+            UploadManager.shared.createMultipartUpload(name: uniqueFileName, mimeType: mimeType, mediaUrl: tempURL) {result in
                 switch result {
                 case .success(_):
                     print("Success")
-//                    self.scheduleSimpleNotification(identifier: uniqueFileName)
+
                 case .failure(_):
                     print("Failure")
                 }
@@ -149,7 +159,7 @@ extension ViewController: PHPickerViewControllerDelegate {
     // Delegate method
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
-
+        UploadManager.shared.totalMediaCount = results.count
         for result in results {
             if result.itemProvider.canLoadObject(ofClass: UIImage.self) {
                 // Handle image
@@ -173,4 +183,6 @@ extension ViewController: PHPickerViewControllerDelegate {
         }
     }
 }
+
+
 

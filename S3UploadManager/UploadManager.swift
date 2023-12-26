@@ -8,6 +8,10 @@ import Foundation
 import UserNotifications
 import UIKit
 
+protocol UploadManagerDelegate: AnyObject {
+    func uploadManager(_ manager: UploadManager, didUpdateProgress progress: Float)
+}
+
 class UploadManager: NSObject {
     static let shared = UploadManager()
     var uploadData = UploadData(fileKey: nil, uploadId: nil, mediaUrl: nil, mimeType: nil, eTag: nil)
@@ -20,6 +24,9 @@ class UploadManager: NSObject {
     private var currentUploadRequest: URLRequest?
     private var currentUploadFileURL: URL?
     private var currentUploadCompletionHandler: ((Result<String?, Error>) -> Void)?
+    private var uploadedMediaCount: Int = 0
+    var totalMediaCount: Int?
+    weak var delegate: UploadManagerDelegate?
     
     override init() {
         super.init()
@@ -28,7 +35,6 @@ class UploadManager: NSObject {
     
     private lazy var backgroundSession: URLSession = {
         let config = URLSessionConfiguration.default
-//        config.isDiscretionary = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
 
@@ -205,7 +211,7 @@ class UploadManager: NSObject {
 
     private func startNextUploadTask() {
         guard !isUploading, !uploadQueue.isEmpty else { return }
-
+        
         isUploading = true
         let nextTask = uploadQueue.removeFirst()
         nextTask()
@@ -329,6 +335,13 @@ extension UploadManager: URLSessionTaskDelegate {
                 switch response {
                 case .success(_):
                     print("MultiPart Success")
+                    self.uploadedMediaCount += 1
+                    let progress = Float(self.uploadedMediaCount) / Float(self.totalMediaCount!)
+                    self.delegate?.uploadManager(self, didUpdateProgress: progress)
+                    if(progress == 1.0) {
+                        self.uploadedMediaCount = 0
+                    }
+                    
                 case .failure(let error):
                     print("Error: \(error.localizedDescription)")
                 }
