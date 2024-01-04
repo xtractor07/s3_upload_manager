@@ -23,8 +23,12 @@ class UploadManager: NSObject {
     private var currentUploadTask: URLSessionUploadTask?
     private var currentUploadRequest: URLRequest?
     private var currentUploadFileURL: URL?
+    private var currentDataChunk: Data?
+    private var currentPart: Int = 0
+    private var activePart: Int = 0
     private var currentUploadCompletionHandler: ((Result<String?, Error>) -> Void)?
     private var uploadedMediaCount: Int = 0
+    private var parts: [Part] = []
     var totalMediaCount: Int?
     weak var delegate: UploadManagerDelegate?
     
@@ -105,6 +109,42 @@ class UploadManager: NSObject {
         }
     }
     
+    func uploadChunk(to preSignedUrl: URL, data: Data, mimeType: String, completion: @escaping (Result<String?, Error>) -> Void) {
+            var request = URLRequest(url: preSignedUrl)
+            request.httpMethod = "PUT"
+            request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
+
+            let task = backgroundSession.uploadTask(with: request, from: data)
+            completionHandlers[.uploadMedia, default: [:]][task.taskIdentifier] = { [weak self] result in
+                switch result {
+                case .success(_):
+//                    if (self!.currentPart == 2){
+                        // Assuming the response data contains the ETag or similar information
+                        guard let httpResponse = task.response as? HTTPURLResponse, 200...299 ~= httpResponse.statusCode else {
+                            completion(.failure(URLError(.badServerResponse)))
+                            return
+                        }
+                        // Extracting ETag from the response headers
+                        let etag = httpResponse.allHeaderFields["Etag"] as? String
+                        // Passing ETag in the success completion
+                        completion(.success(etag))
+//                    }
+
+                case .failure(let error):
+                    completion(.failure(error))
+                }
+
+                // Cleanup
+                self?.taskInfoMap.removeValue(forKey: task.taskIdentifier)
+            }
+            
+            currentUploadTask = task
+            currentUploadRequest = request
+            currentDataChunk = data
+            currentUploadCompletionHandler = completion
+            task.resume()
+    }
+    
     func uploadMedia(to preSignedUrl: URL, fileURL: URL, mimeType: String, completion: @escaping (Result<String?, Error>) -> Void) {
             var request = URLRequest(url: preSignedUrl)
             request.httpMethod = "PUT"
@@ -131,7 +171,7 @@ class UploadManager: NSObject {
                 // Cleanup
                 self?.taskInfoMap.removeValue(forKey: task.taskIdentifier)
             }
-            
+
             currentUploadTask = task
             currentUploadRequest = request
             currentUploadFileURL = fileURL
@@ -264,11 +304,14 @@ extension UploadManager: URLSessionTaskDelegate {
                         handleGetMultipartPreSignedUrlsResponse(httpResponse, data: responseData)
                         
                     case .uploadMedia:
+                        currentPart += activePart
+                        if currentPart == 2 {
                         handleUploadMediaResponse(httpResponse, data: responseData)
-                        
+                        }
                     case .completeMultipartUpload:
                         // After handling completion
                         DispatchQueue.main.async { [weak self] in
+                            self?.removeTemporaryFile(fileURL: (self?.uploadData.mediaUrl!)!)
                             self?.isUploading = false
                             self?.startNextUploadTask()
                         }
@@ -290,7 +333,7 @@ extension UploadManager: URLSessionTaskDelegate {
         do {
             let response = try JSONDecoder().decode(CreateMultipartUploadResponse.self, from: data)
             self.uploadData.uploadId = response.uploadId
-            self.getMultipartPreSignedUrls(fileKey: response.fileKey, uploadId: response.uploadId, parts: 1) { response in
+            self.getMultipartPreSignedUrls(fileKey: response.fileKey, uploadId: response.uploadId, parts: 2) { response in
                 switch response {
                 case .success(_):
                     print("PresignedSuccess")
@@ -307,18 +350,29 @@ extension UploadManager: URLSessionTaskDelegate {
         // Process the data and httpResponse as needed for getMultipartPreSignedUrls
         do {
             let response = try JSONDecoder().decode(PreSignedURLResponse.self, from: data)
-            guard let preSignedUrlString = response.parts.first?.signedUrl,
-                  let preSignedUrl = URL(string: preSignedUrlString) else {
-                return
-            }
-
-            self.uploadMedia(to: preSignedUrl, fileURL: self.uploadData.mediaUrl!, mimeType: self.uploadData.mimeType!) { response in
-                switch response {
-                case .success(let etag):
-                    self.uploadData.eTag = etag!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                    print("UploadSuccess")
-                case .failure(let error):
-                    print(error.localizedDescription)
+//            guard let preSignedUrlString = response.parts.first?.signedUrl,
+//                  let preSignedUrl = URL(string: preSignedUrlString) else {
+//                return
+//            }
+            var currentChunk = 0
+            
+            if let fileData = loadDataFromFileURL(fileURL: uploadData.mediaUrl!) {
+                let chunks = splitFileDataIntoChunks(fileData: fileData, numberOfChunks: 2)
+//                = [Part(PartNumber: currentPart, ETag: self.uploadData.eTag!)]
+                response.parts.forEach { part in
+                    self.uploadChunk(to: URL(string: part.signedUrl)!, data: chunks[currentChunk], mimeType: self.uploadData.mimeType!) { response in
+                        self.activePart = part.partNumber
+                        switch response {
+                        case .success(let etag):
+                            self.uploadData.eTag = etag!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                            self.parts.append(Part(PartNumber: self.activePart, ETag: self.uploadData.eTag!))
+                            self.currentPart = part.partNumber
+                            print("UploadSuccess")
+                        case .failure(let error):
+                            print(error.localizedDescription)
+                        }
+                    }
+                    currentChunk += 1
                 }
             }
         } catch {
@@ -329,12 +383,11 @@ extension UploadManager: URLSessionTaskDelegate {
     private func handleUploadMediaResponse(_ response: HTTPURLResponse, data: Data) {
         // Process the data and httpResponse as needed for uploadMedia
             self.uploadData.eTag = (response.allHeaderFields["Etag"] as? String)!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-
-            let parts = [Part(PartNumber: 1, ETag: self.uploadData.eTag!)]
-            self.completeMultipartUpload(fileKey: self.uploadData.fileKey!, uploadId: self.uploadData.uploadId!, parts: parts){ response in
+            
+        self.completeMultipartUpload(fileKey: self.uploadData.fileKey!, uploadId: self.uploadData.uploadId!, parts: parts){ [self] response in
                 switch response {
                 case .success(_):
-                    print("MultiPart Success")
+                    print("MultiPart Success: \(parts)")
                     self.uploadedMediaCount += 1
                     let progress = Float(self.uploadedMediaCount) / Float(self.totalMediaCount!)
                     self.delegate?.uploadManager(self, didUpdateProgress: progress)
@@ -367,7 +420,20 @@ extension UploadManager: URLSessionTaskDelegate {
         // Add more conditions as needed
         return nil
     }
-
+    
+    private func removeTemporaryFile(fileURL: URL) {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: fileURL.path) {
+            do {
+                try fileManager.removeItem(at: fileURL)
+                print("Temporary file removed: \(fileURL)")
+            } catch {
+                print("Failed to remove temporary file: \(error)")
+            }
+        } else {
+            print("File does not exist, no need to delete: \(fileURL)")
+        }
+    }
 }
 
 
@@ -441,6 +507,31 @@ extension UploadManager {
     private func cancelCurrentUploadTask() {
         currentUploadTask?.cancel()
         currentUploadTask = nil
+    }
+    
+    func splitFileDataIntoChunks(fileData: Data, numberOfChunks: Int) -> [Data] {
+        let totalSize = fileData.count
+        let chunkSize = totalSize / numberOfChunks
+        var chunks: [Data] = []
+
+        for i in 0..<numberOfChunks {
+            let start = i * chunkSize
+            let end = (i == numberOfChunks - 1) ? totalSize : start + chunkSize
+            let chunk = fileData.subdata(in: start..<end)
+            chunks.append(chunk)
+        }
+
+        return chunks
+    }
+    
+    func loadDataFromFileURL(fileURL: URL) -> Data? {
+        do {
+            let data = try Data(contentsOf: fileURL)
+            return data
+        } catch {
+            print("Error loading file data: \(error)")
+            return nil
+        }
     }
     
     func restartCurrentUpload() {
