@@ -26,6 +26,7 @@ class UploadManager: NSObject {
     private var currentDataChunk: Data?
     private var currentPart: Int = 0
     private var activePart: Int = 0
+    private var chunkCount = 3
     private var currentUploadCompletionHandler: ((Result<String?, Error>) -> Void)?
     private var uploadedMediaCount: Int = 0
     private var parts: [Part] = []
@@ -112,13 +113,13 @@ class UploadManager: NSObject {
     func uploadChunk(to preSignedUrl: URL, data: Data, mimeType: String, completion: @escaping (Result<String?, Error>) -> Void) {
             var request = URLRequest(url: preSignedUrl)
             request.httpMethod = "PUT"
+            request.httpBody = data
             request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
 
             let task = backgroundSession.uploadTask(with: request, from: data)
             completionHandlers[.uploadMedia, default: [:]][task.taskIdentifier] = { [weak self] result in
                 switch result {
                 case .success(_):
-//                    if (self!.currentPart == 2){
                         // Assuming the response data contains the ETag or similar information
                         guard let httpResponse = task.response as? HTTPURLResponse, 200...299 ~= httpResponse.statusCode else {
                             completion(.failure(URLError(.badServerResponse)))
@@ -128,7 +129,6 @@ class UploadManager: NSObject {
                         let etag = httpResponse.allHeaderFields["Etag"] as? String
                         // Passing ETag in the success completion
                         completion(.success(etag))
-//                    }
 
                 case .failure(let error):
                     completion(.failure(error))
@@ -225,6 +225,7 @@ class UploadManager: NSObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let uploadData = CompleteUploadRequest(fileKey: fileKey, UploadId: uploadId, parts: parts)
+        print("RequestBody: \(uploadData)")
 
         do {
             let jsonData = try JSONEncoder().encode(uploadData)
@@ -304,12 +305,15 @@ extension UploadManager: URLSessionTaskDelegate {
                         handleGetMultipartPreSignedUrlsResponse(httpResponse, data: responseData)
                         
                     case .uploadMedia:
-                        currentPart += activePart
-                        if currentPart == 2 {
+                        currentPart = activePart
                         handleUploadMediaResponse(httpResponse, data: responseData)
+                        print("CurrentPart: \(currentPart)\nActivePart: \(activePart)")
+                        if currentPart == chunkCount {
+                        callCompleteMultipart()
                         }
                     case .completeMultipartUpload:
                         // After handling completion
+                        handleCompleteMultipartUploadResponse(httpResponse, responseData: responseData)
                         DispatchQueue.main.async { [weak self] in
                             self?.removeTemporaryFile(fileURL: (self?.uploadData.mediaUrl!)!)
                             self?.isUploading = false
@@ -333,7 +337,7 @@ extension UploadManager: URLSessionTaskDelegate {
         do {
             let response = try JSONDecoder().decode(CreateMultipartUploadResponse.self, from: data)
             self.uploadData.uploadId = response.uploadId
-            self.getMultipartPreSignedUrls(fileKey: response.fileKey, uploadId: response.uploadId, parts: 2) { response in
+            self.getMultipartPreSignedUrls(fileKey: response.fileKey, uploadId: response.uploadId, parts: chunkCount) { response in
                 switch response {
                 case .success(_):
                     print("PresignedSuccess")
@@ -345,64 +349,79 @@ extension UploadManager: URLSessionTaskDelegate {
             print("error")
         }
     }
-
+    
     private func handleGetMultipartPreSignedUrlsResponse(_ response: HTTPURLResponse, data: Data) {
         // Process the data and httpResponse as needed for getMultipartPreSignedUrls
         do {
-            let response = try JSONDecoder().decode(PreSignedURLResponse.self, from: data)
-//            guard let preSignedUrlString = response.parts.first?.signedUrl,
-//                  let preSignedUrl = URL(string: preSignedUrlString) else {
-//                return
-//            }
-            var currentChunk = 0
+            let presignedResponse = try JSONDecoder().decode(PreSignedURLResponse.self, from: data)
+            guard let fileData = loadDataFromFileURL(fileURL: uploadData.mediaUrl!) else { return }
             
-            if let fileData = loadDataFromFileURL(fileURL: uploadData.mediaUrl!) {
-                let chunks = splitFileDataIntoChunks(fileData: fileData, numberOfChunks: 2)
-//                = [Part(PartNumber: currentPart, ETag: self.uploadData.eTag!)]
-                response.parts.forEach { part in
-                    self.uploadChunk(to: URL(string: part.signedUrl)!, data: chunks[currentChunk], mimeType: self.uploadData.mimeType!) { response in
-                        self.activePart = part.partNumber
-                        switch response {
-                        case .success(let etag):
-                            self.uploadData.eTag = etag!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                            self.parts.append(Part(PartNumber: self.activePart, ETag: self.uploadData.eTag!))
-                            self.currentPart = part.partNumber
-                            print("UploadSuccess")
-                        case .failure(let error):
-                            print(error.localizedDescription)
-                        }
-                    }
-                    currentChunk += 1
-                }
-            }
+            let chunks = splitFileDataIntoChunks(fileData: fileData, numberOfChunks: presignedResponse.parts.count)
+            uploadChunksSequentially(presignedUrls: presignedResponse.parts, chunks: chunks, currentChunk: 0)
         } catch {
-            
+            print("Error processing response: \(error)")
         }
     }
 
+    private func uploadChunksSequentially(presignedUrls: [PreSignedURLResponse.Part], chunks: [Data], currentChunk: Int) {
+        if currentChunk >= presignedUrls.count {
+            // All chunks are uploaded
+            print("All chunks uploaded successfully")
+            return
+        }
+
+        let part = presignedUrls[currentChunk]
+        let chunkData = chunks[currentChunk]
+        self.activePart = part.partNumber
+        
+        self.uploadChunk(to: URL(string: part.signedUrl)!, data: chunkData, mimeType: self.uploadData.mimeType!) { [weak self] response in
+            switch response {
+            case .success(_):
+                print("Chunk \(self?.activePart ?? 0) upload success")
+                // Recursively call to upload the next chunk
+                self?.uploadChunksSequentially(presignedUrls: presignedUrls, chunks: chunks, currentChunk: currentChunk + 1)
+
+            case .failure(let error):
+                print("Error uploading chunk \(self?.activePart ?? 0): \(error)")
+            }
+        }
+    }
+
+
     private func handleUploadMediaResponse(_ response: HTTPURLResponse, data: Data) {
         // Process the data and httpResponse as needed for uploadMedia
-            self.uploadData.eTag = (response.allHeaderFields["Etag"] as? String)!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            
+        self.uploadData.eTag = (response.allHeaderFields["Etag"] as? String)!.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        self.parts.append(Part(PartNumber: self.activePart , ETag: self.uploadData.eTag ?? ""))
+    }
+    
+    private func callCompleteMultipart(){
         self.completeMultipartUpload(fileKey: self.uploadData.fileKey!, uploadId: self.uploadData.uploadId!, parts: parts){ [self] response in
                 switch response {
                 case .success(_):
-                    print("MultiPart Success: \(parts)")
+                    print("MultiPart Success")
                     self.uploadedMediaCount += 1
                     let progress = Float(self.uploadedMediaCount) / Float(self.totalMediaCount!)
                     self.delegate?.uploadManager(self, didUpdateProgress: progress)
                     if(progress == 1.0) {
                         self.uploadedMediaCount = 0
                     }
-                    
+
                 case .failure(let error):
                     print("Error: \(error.localizedDescription)")
                 }
             }
     }
 
-    private func handleCompleteMultipartUploadResponse(_ response: HTTPURLResponse, data: Data, completion: (Result<Data, Error>) -> Void) {
+    private func handleCompleteMultipartUploadResponse(_ response: HTTPURLResponse, responseData: Data?) {
         // Process the data and httpResponse as needed for completeMultipartUpload
+        parts = []
+        if let responseData = responseData {
+            if let responseString = String(data: responseData, encoding: .utf8) {
+                print("Response String: \(responseString)")
+            } else {
+                print("Couldn't convert data to a UTF-8 string")
+            }
+        }
     }
     
     func getTaskType(from task: URLSessionTask) -> UploadTaskType? {
