@@ -10,6 +10,9 @@ import UIKit
 
 protocol UploadManagerDelegate: AnyObject {
     func uploadManager(_ manager: UploadManager, didUpdateProgress progress: Float)
+    func activeMediaProgress(_ manager: UploadManager, didUpdateProgress progress: Float)
+    func uploadStatus(_ manager: UploadManager, uploadComplete status: Bool)
+    func uploadSpeed(_ manager: UploadManager, uploadSpeed speed: Double)
 }
 
 class UploadManager: NSObject {
@@ -30,8 +33,11 @@ class UploadManager: NSObject {
     private var currentUploadCompletionHandler: ((Result<String?, Error>) -> Void)?
     private var uploadedMediaCount: Int = 0
     private var parts: [Part] = []
+    private var previousBytesSent: Int64 = 0
+    private var previousUpdateTime: TimeInterval = Date().timeIntervalSince1970
     var totalMediaCount: Int?
     weak var delegate: UploadManagerDelegate?
+
     
     override init() {
         super.init()
@@ -283,6 +289,33 @@ class UploadManager: NSObject {
 // URLSession Delegate Methods
 extension UploadManager: URLSessionTaskDelegate {
     
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        let currentTime = Date().timeIntervalSince1970
+
+        // Ensure that the current time is indeed later than the previous update time
+        if currentTime > previousUpdateTime {
+            let timeElapsed = currentTime - previousUpdateTime
+
+            // Update every second or more
+            if timeElapsed >= 1 {
+                let bytesSinceLastUpdate = totalBytesSent - previousBytesSent
+                // Guard against negative values
+                if bytesSinceLastUpdate > 0 {
+                    let speedBytesPerSec = Double(bytesSinceLastUpdate) / timeElapsed // Speed in bytes per second
+                    let speedMBPerSec = speedBytesPerSec / 1_048_576 // Convert to MB/s
+                    let roundedSpeed = round(speedMBPerSec * 100) / 100 // Round to two decimal places
+
+                    print("Upload Speed: \(roundedSpeed) MB/sec")
+                    self.delegate!.uploadSpeed(self, uploadSpeed: roundedSpeed)
+                }
+
+                // Reset tracking variables
+                previousBytesSent = totalBytesSent
+                previousUpdateTime = currentTime
+            }
+        }
+    }
+    
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let taskType: UploadTaskType = getTaskType(from: task)! // derive from task metadata or other logic
 
@@ -330,7 +363,7 @@ extension UploadManager: URLSessionTaskDelegate {
                 completionHandlers[taskType]?.removeValue(forKey: task.taskIdentifier)
                 taskInfoMap.removeValue(forKey: task.taskIdentifier)
             }
-        }
+    }
     
     private func handleCreateMultipartUploadResponse(_ response: HTTPURLResponse, data: Data) {
         // Process the data and httpResponse as needed for createMultipartUpload
@@ -374,12 +407,14 @@ extension UploadManager: URLSessionTaskDelegate {
         let chunkData = chunks[currentChunk]
         self.activePart = part.partNumber
         
+        self.delegate?.uploadStatus(self, uploadComplete: true)
         self.uploadChunk(to: URL(string: part.signedUrl)!, data: chunkData, mimeType: self.uploadData.mimeType!) { [weak self] response in
             switch response {
             case .success(_):
                 print("Chunk \(self?.activePart ?? 0) upload success")
                 // Recursively call to upload the next chunk
                 self?.uploadChunksSequentially(presignedUrls: presignedUrls, chunks: chunks, currentChunk: currentChunk + 1)
+                self?.delegate?.activeMediaProgress(self!, didUpdateProgress: Float(currentChunk + 1) / Float(chunks.count))
 
             case .failure(let error):
                 print("Error uploading chunk \(self?.activePart ?? 0): \(error)")
@@ -403,8 +438,14 @@ extension UploadManager: URLSessionTaskDelegate {
                     let progress = Float(self.uploadedMediaCount) / Float(self.totalMediaCount!)
                     self.delegate?.uploadManager(self, didUpdateProgress: progress)
                     if(progress == 1.0) {
+                        self.delegate?.activeMediaProgress(self, didUpdateProgress: 0.0)
+                        self.delegate?.uploadStatus(self, uploadComplete: false)
                         self.uploadedMediaCount = 0
+                        self.delegate?.uploadSpeed(self, uploadSpeed: 0.0)
                     }
+//                    if(uploadedMediaCount == totalMediaCount) {
+//                        self.delegate?.uploadComplete(self, uploadComplete: UIColor.systemGreen)
+//                    }
 
                 case .failure(let error):
                     print("Error: \(error.localizedDescription)")

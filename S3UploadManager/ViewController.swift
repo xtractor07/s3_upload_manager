@@ -10,32 +10,67 @@ import PhotosUI
 import UserNotifications
 
 class ViewController: UIViewController, UploadManagerDelegate {
+    func uploadStatus(_ manager: UploadManager, uploadComplete status: Bool) {
+        DispatchQueue.main.async { [self] in
+            if status {
+                activityIndicator.startAnimating()
+            } else {
+                activityIndicator.stopAnimating()
+            }
+        }
+    }
+    
+    func uploadSpeed(_ manager: UploadManager, uploadSpeed speed: Double) {
+        DispatchQueue.main.async { [self] in
+            speedLabel.text = "\(speed) MB/s"
+        }
+    }
+    
     
 //    var uploadManager: UploadManager!
     @IBOutlet weak var selectMediaBtn: UIButton!
-    @IBOutlet weak var uploadStatusBtn: UIButton!
+//    @IBOutlet weak var uploadStatusBtn: UIButton!
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-    @IBOutlet weak var progressBar: UIProgressView!
+    @IBOutlet weak var totalMediaProgress: UIProgressView!
+    @IBOutlet weak var currentMediaProgress: UIProgressView!
+    @IBOutlet weak var speedLabel: UILabel!
+    @IBOutlet weak var activityIndicator: UIActivityIndicatorView!
     
+    var previousBytesSent: Int64 = 0
+    var previousUpdateTime: TimeInterval = Date().timeIntervalSince1970
+
     override func viewDidLoad() {
         super.viewDidLoad()
         UploadManager.shared.delegate = self
 //        uploadManager = UploadManager()
         NotificationCenter.default.addObserver(self, selector: #selector(appMovedToBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
-
-
         // Do any additional setup after loading the view.
     }
     
     @IBAction func selectMediaDidPressed(_ sender: UIButton) {
-        self.progressBar.progress = 0.0
+        self.totalMediaProgress.progress = 0.0
+        self.currentMediaProgress.progress = 0.0
         presentImageAndVideoPicker()
     }
     
     func uploadManager(_ manager: UploadManager, didUpdateProgress progress: Float) {
         DispatchQueue.main.async {
             print("Progress: \(progress)")
-            self.progressBar.progress = progress
+            self.totalMediaProgress.progress = progress
+        }
+    }
+    
+    func activeMediaProgress(_ manager: UploadManager, didUpdateProgress progress: Float) {
+        DispatchQueue.main.async {
+            print("ActiveMediaProgress: \(progress)")
+            self.currentMediaProgress.progress = progress
+        }
+    }
+    
+    func uploadStatus(_ manager: UploadManager, uploadComplete color: UIColor) {
+        DispatchQueue.main.async {
+//            self.uploadStatusBtn.backgroundColor = color
+//            self.uploadStatusBtn.tintColor = color
         }
     }
     
