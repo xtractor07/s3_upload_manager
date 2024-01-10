@@ -17,7 +17,7 @@
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <stackView opaque="NO" contentMode="scaleToFill" axis="vertical" alignment="center" spacing="48" translatesAutoresizingMaskIntoConstraints="NO" id="5qa-sT-bJQ">
-                                <rect key="frame" x="222" y="408.5" width="300" height="316"/>
+                                <rect key="frame" x="222" y="400" width="300" height="333"/>
                                 <subviews>
                                     <stackView opaque="NO" contentMode="scaleToFill" spacing="32" translatesAutoresizingMaskIntoConstraints="NO" id="ZDZ-S2-AOc">
                                         <rect key="frame" x="71.5" y="0.0" width="157" height="20.5"/>
@@ -78,8 +78,9 @@
                                             <action selector="selectMediaDidPressed:" destination="BYZ-38-t0r" eventType="touchUpInside" id="qtH-Ao-TkD"/>
                                         </connections>
                                     </button>
-                                    <activityIndicatorView opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" style="medium" translatesAutoresizingMaskIntoConstraints="NO" id="3Bc-u4-Jt1">
-                                        <rect key="frame" x="140" y="296" width="20" height="20"/>
+                                    <activityIndicatorView opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" style="large" translatesAutoresizingMaskIntoConstraints="NO" id="3Bc-u4-Jt1">
+                                        <rect key="frame" x="131.5" y="296" width="37" height="37"/>
+                                        <color key="color" systemColor="systemRedColor"/>
                                     </activityIndicatorView>
                                 </subviews>
                             </stackView>
@@ -107,6 +108,9 @@
     <resources>
         <systemColor name="systemBackgroundColor">
             <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+        </systemColor>
+        <systemColor name="systemRedColor">
+            <color red="1" green="0.23137254901960785" blue="0.18823529411764706" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
         </systemColor>
     </resources>
 </document>

@@ -13,8 +13,10 @@ class ViewController: UIViewController, UploadManagerDelegate {
     func uploadStatus(_ manager: UploadManager, uploadComplete status: Bool) {
         DispatchQueue.main.async { [self] in
             if status {
+                activityIndicator.color = UIColor.systemYellow
                 activityIndicator.startAnimating()
             } else {
+                activityIndicator.color = UIColor.systemGreen
                 activityIndicator.stopAnimating()
             }
         }
@@ -50,6 +52,7 @@ class ViewController: UIViewController, UploadManagerDelegate {
     @IBAction func selectMediaDidPressed(_ sender: UIButton) {
         self.totalMediaProgress.progress = 0.0
         self.currentMediaProgress.progress = 0.0
+        activityIndicator.color = UIColor.systemRed
         presentImageAndVideoPicker()
     }
     

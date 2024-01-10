@@ -29,7 +29,7 @@ class UploadManager: NSObject {
     private var currentDataChunk: Data?
     private var currentPart: Int = 0
     private var activePart: Int = 0
-    private var chunkCount = 3
+    private var chunkCount: Int?
     private var currentUploadCompletionHandler: ((Result<String?, Error>) -> Void)?
     private var uploadedMediaCount: Int = 0
     private var parts: [Part] = []
@@ -365,12 +365,29 @@ extension UploadManager: URLSessionTaskDelegate {
             }
     }
     
+    func calculateNumberOfChunks(forFileAt fileURL: URL, minimumChunkSizeMB: Int = 5) -> Int {
+        do {
+            let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            guard let fileSize = fileAttributes[.size] as? Int64 else { return 0 }
+
+            let chunkSizeBytes = minimumChunkSizeMB * 1024 * 1024
+            let numberOfChunks = Int(ceil(Double(fileSize) / Double(chunkSizeBytes)))
+
+            return numberOfChunks
+        } catch {
+            print("Error getting file size: \(error)")
+            return 0
+        }
+    }
+
+    
     private func handleCreateMultipartUploadResponse(_ response: HTTPURLResponse, data: Data) {
         // Process the data and httpResponse as needed for createMultipartUpload
         do {
             let response = try JSONDecoder().decode(CreateMultipartUploadResponse.self, from: data)
             self.uploadData.uploadId = response.uploadId
-            self.getMultipartPreSignedUrls(fileKey: response.fileKey, uploadId: response.uploadId, parts: chunkCount) { response in
+            chunkCount = calculateNumberOfChunks(forFileAt: self.uploadData.mediaUrl!)
+            self.getMultipartPreSignedUrls(fileKey: response.fileKey, uploadId: response.uploadId, parts: chunkCount!) { response in
                 switch response {
                 case .success(_):
                     print("PresignedSuccess")
@@ -389,7 +406,7 @@ extension UploadManager: URLSessionTaskDelegate {
             let presignedResponse = try JSONDecoder().decode(PreSignedURLResponse.self, from: data)
             guard let fileData = loadDataFromFileURL(fileURL: uploadData.mediaUrl!) else { return }
             
-            let chunks = splitFileDataIntoChunks(fileData: fileData, numberOfChunks: presignedResponse.parts.count)
+            let chunks = splitFileDataIntoChunks(fileData: fileData)
             uploadChunksSequentially(presignedUrls: presignedResponse.parts, chunks: chunks, currentChunk: 0)
         } catch {
             print("Error processing response: \(error)")
@@ -569,20 +586,39 @@ extension UploadManager {
         currentUploadTask = nil
     }
     
-    func splitFileDataIntoChunks(fileData: Data, numberOfChunks: Int) -> [Data] {
+//    func splitFileDataIntoChunks(fileData: Data, numberOfChunks: Int) -> [Data] {
+//        let totalSize = fileData.count
+//        let chunkSize = totalSize / numberOfChunks
+//        var chunks: [Data] = []
+//
+//        for i in 0..<numberOfChunks {
+//            let start = i * chunkSize
+//            let end = (i == numberOfChunks - 1) ? totalSize : start + chunkSize
+//            let chunk = fileData.subdata(in: start..<end)
+//            print(chunk.count)
+//            chunks.append(chunk)
+//        }
+//
+//        return chunks
+//    }
+    
+    func splitFileDataIntoChunks(fileData: Data, minimumChunkSizeMB: Int = 5) -> [Data] {
         let totalSize = fileData.count
-        let chunkSize = totalSize / numberOfChunks
+        let minimumChunkSizeBytes = minimumChunkSizeMB * 1024 * 1024
+        let numberOfChunks = max(1, Int(ceil(Double(totalSize) / Double(minimumChunkSizeBytes))))
+        
         var chunks: [Data] = []
 
         for i in 0..<numberOfChunks {
-            let start = i * chunkSize
-            let end = (i == numberOfChunks - 1) ? totalSize : start + chunkSize
+            let start = i * minimumChunkSizeBytes
+            let end = (i == numberOfChunks - 1) ? totalSize : min(start + minimumChunkSizeBytes, totalSize)
             let chunk = fileData.subdata(in: start..<end)
             chunks.append(chunk)
         }
 
         return chunks
     }
+
     
     func loadDataFromFileURL(fileURL: URL) -> Data? {
         do {
