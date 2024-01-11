@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EA2F623D2B4FA6FB0092C8ED /* MultipartSynchronizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA2F623C2B4FA6FB0092C8ED /* MultipartSynchronizer.swift */; };
 		EA4B7CBC2B29776B007FA525 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4B7CBB2B29776B007FA525 /* AppDelegate.swift */; };
 		EA4B7CBE2B29776B007FA525 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4B7CBD2B29776B007FA525 /* SceneDelegate.swift */; };
 		EA4B7CC02B29776B007FA525 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA4B7CBF2B29776B007FA525 /* ViewController.swift */; };
@@ -18,6 +19,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		EA2F623C2B4FA6FB0092C8ED /* MultipartSynchronizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartSynchronizer.swift; sourceTree = "<group>"; };
 		EA4B7CB82B29776B007FA525 /* S3UploadManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = S3UploadManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		EA4B7CBB2B29776B007FA525 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		EA4B7CBD2B29776B007FA525 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
@@ -64,6 +66,7 @@
 				EA4B7CBD2B29776B007FA525 /* SceneDelegate.swift */,
 				EA4B7CBF2B29776B007FA525 /* ViewController.swift */,
 				EA4B7CD12B2984B8007FA525 /* UploadManager.swift */,
+				EA2F623C2B4FA6FB0092C8ED /* MultipartSynchronizer.swift */,
 				EA4B7CCF2B29848E007FA525 /* UploadData.swift */,
 				EA4B7CC12B29776B007FA525 /* Main.storyboard */,
 				EA4B7CC42B29776D007FA525 /* Assets.xcassets */,
@@ -146,6 +149,7 @@
 			files = (
 				EA4B7CC02B29776B007FA525 /* ViewController.swift in Sources */,
 				EA4B7CBC2B29776B007FA525 /* AppDelegate.swift in Sources */,
+				EA2F623D2B4FA6FB0092C8ED /* MultipartSynchronizer.swift in Sources */,
 				EA4B7CD02B29848E007FA525 /* UploadData.swift in Sources */,
 				EA4B7CD22B2984B8007FA525 /* UploadManager.swift in Sources */,
 				EA4B7CBE2B29776B007FA525 /* SceneDelegate.swift in Sources */,
