@@ -460,9 +460,6 @@ extension UploadManager: URLSessionTaskDelegate {
                         self.uploadedMediaCount = 0
                         self.delegate?.uploadSpeed(self, uploadSpeed: 0.0)
                     }
-//                    if(uploadedMediaCount == totalMediaCount) {
-//                        self.delegate?.uploadComplete(self, uploadComplete: UIColor.systemGreen)
-//                    }
 
                 case .failure(let error):
                     print("Error: \(error.localizedDescription)")
@@ -585,22 +582,6 @@ extension UploadManager {
         currentUploadTask?.cancel()
         currentUploadTask = nil
     }
-    
-//    func splitFileDataIntoChunks(fileData: Data, numberOfChunks: Int) -> [Data] {
-//        let totalSize = fileData.count
-//        let chunkSize = totalSize / numberOfChunks
-//        var chunks: [Data] = []
-//
-//        for i in 0..<numberOfChunks {
-//            let start = i * chunkSize
-//            let end = (i == numberOfChunks - 1) ? totalSize : start + chunkSize
-//            let chunk = fileData.subdata(in: start..<end)
-//            print(chunk.count)
-//            chunks.append(chunk)
-//        }
-//
-//        return chunks
-//    }
     
     func splitFileDataIntoChunks(fileData: Data, minimumChunkSizeMB: Int = 5) -> [Data] {
         let totalSize = fileData.count
