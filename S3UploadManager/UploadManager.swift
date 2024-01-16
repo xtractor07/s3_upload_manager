@@ -37,6 +37,7 @@ class UploadManager: NSObject {
     private var previousUpdateTime: TimeInterval = Date().timeIntervalSince1970
     var totalMediaCount: Int?
     weak var delegate: UploadManagerDelegate?
+    let defaults = UserDefaults.standard
 
     
     override init() {
@@ -304,9 +305,10 @@ extension UploadManager: URLSessionTaskDelegate {
                     let speedBytesPerSec = Double(bytesSinceLastUpdate) / timeElapsed // Speed in bytes per second
                     let speedMBPerSec = speedBytesPerSec / 1_048_576 // Convert to MB/s
                     let roundedSpeed = round(speedMBPerSec * 100) / 100 // Round to two decimal places
-
-                    print("Upload Speed: \(roundedSpeed) MB/sec")
-                    self.delegate!.uploadSpeed(self, uploadSpeed: roundedSpeed)
+                    DispatchQueue.main.async {
+//                        print("Upload Speed: \(roundedSpeed) MB/sec")
+                        self.delegate!.uploadSpeed(self, uploadSpeed: roundedSpeed)
+                    }
                 }
 
                 // Reset tracking variables
@@ -424,6 +426,16 @@ extension UploadManager: URLSessionTaskDelegate {
         let chunkData = chunks[currentChunk]
         self.activePart = part.partNumber
         
+        do {
+            let encodedData = try JSONEncoder().encode(presignedUrls)
+            defaults.set(encodedData, forKey: "PresignedUrls")
+        } catch {
+            print("Failed to encode parts: \(error)")
+
+        }
+        defaults.setValue(chunks, forKey: "ActiveChunks")
+        defaults.setValue(currentChunk, forKey: "CurrentChunk")
+        
         self.delegate?.uploadStatus(self, uploadComplete: true)
         self.uploadChunk(to: URL(string: part.signedUrl)!, data: chunkData, mimeType: self.uploadData.mimeType!) { [weak self] response in
             switch response {
@@ -435,6 +447,23 @@ extension UploadManager: URLSessionTaskDelegate {
 
             case .failure(let error):
                 print("Error uploading chunk \(self?.activePart ?? 0): \(error)")
+            }
+        }
+    }
+    
+    private func pauseUpload() {
+        currentUploadTask?.cancel()
+        currentUploadTask = nil
+    }
+
+    private func resumeUpload() {
+        if let storedData = defaults.data(forKey: "PresignedUrls") {
+            do {
+                let storedParts = try JSONDecoder().decode([PreSignedURLResponse.Part].self, from: storedData)
+                print("Resumed")
+                uploadChunksSequentially(presignedUrls: storedParts, chunks: defaults.array(forKey: "ActiveChunks") as! [Data] , currentChunk: defaults.integer(forKey: "CurrentChunk"))
+            } catch {
+                print("Failed to decode parts: \(error)")
             }
         }
     }
@@ -529,14 +558,17 @@ extension UploadManager {
     
     @objc private func appDidEnterBackground() {
         // Handle transition to background
-        switchToBackgroundSession()
-        restartCurrentUpload()
+        if(isUploading) {
+            print("Paused")
+            pauseUpload()
+        }
     }
 
     @objc private func appDidEnterForeground() {
         // Handle transition to foreground
-        switchToForegroundSession()
-        restartCurrentUpload()
+        if(isUploading) {
+            resumeUpload()
+        }
     }
 }
 
