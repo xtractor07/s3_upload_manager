@@ -151,40 +151,6 @@ class UploadManager: NSObject {
             task.resume()
     }
     
-    func uploadMedia(to preSignedUrl: URL, fileURL: URL, mimeType: String, completion: @escaping (Result<String?, Error>) -> Void) {
-            var request = URLRequest(url: preSignedUrl)
-            request.httpMethod = "PUT"
-            request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-
-            let task = backgroundSession.uploadTask(with: request, fromFile: fileURL)
-            completionHandlers[.uploadMedia, default: [:]][task.taskIdentifier] = { [weak self] result in
-                switch result {
-                case .success(_):
-                    // Assuming the response data contains the ETag or similar information
-                    guard let httpResponse = task.response as? HTTPURLResponse, 200...299 ~= httpResponse.statusCode else {
-                        completion(.failure(URLError(.badServerResponse)))
-                        return
-                    }
-                    // Extracting ETag from the response headers
-                    let etag = httpResponse.allHeaderFields["Etag"] as? String
-                    // Passing ETag in the success completion
-                    completion(.success(etag))
-
-                case .failure(let error):
-                    completion(.failure(error))
-                }
-
-                // Cleanup
-                self?.taskInfoMap.removeValue(forKey: task.taskIdentifier)
-            }
-
-            currentUploadTask = task
-            currentUploadRequest = request
-            currentUploadFileURL = fileURL
-            currentUploadCompletionHandler = completion
-            task.resume()
-    }
-    
     private func performCreateMultipartUpload(name: String, mimeType: String, mediaUrl: URL) {
         // Existing createMultipartUpload logic here
         guard let url = URL(string: "http://13.57.38.104:8080/uploads/createMultipartUpload") else {
@@ -225,7 +191,7 @@ class UploadManager: NSObject {
             completion(.failure(URLError(.badURL)))
             return
         }
-
+    
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -305,8 +271,10 @@ extension UploadManager: URLSessionTaskDelegate {
                     let speedMBPerSec = speedBytesPerSec / 1_048_576 // Convert to MB/s
                     let roundedSpeed = round(speedMBPerSec * 100) / 100 // Round to two decimal places
 
-                    print("Upload Speed: \(roundedSpeed) MB/sec")
-                    self.delegate!.uploadSpeed(self, uploadSpeed: roundedSpeed)
+                    // Update UI with throttled updates
+                    DispatchQueue.main.async {
+                        self.delegate?.uploadSpeed(self, uploadSpeed: roundedSpeed)
+                    }
                 }
 
                 // Reset tracking variables
@@ -314,6 +282,7 @@ extension UploadManager: URLSessionTaskDelegate {
                 previousUpdateTime = currentTime
             }
         }
+
     }
     
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -365,7 +334,7 @@ extension UploadManager: URLSessionTaskDelegate {
             }
     }
     
-    func calculateNumberOfChunks(forFileAt fileURL: URL, minimumChunkSizeMB: Int = 5) -> Int {
+    func calculateNumberOfChunks(forFileAt fileURL: URL, minimumChunkSizeMB: Int = 10) -> Int {
         do {
             let fileAttributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             guard let fileSize = fileAttributes[.size] as? Int64 else { return 0 }
@@ -610,7 +579,7 @@ extension UploadManager {
             return nil
         }
     }
-    
+        
     func restartCurrentUpload() {
             guard let request = currentUploadRequest, let fileURL = currentUploadFileURL else {
                 print("No current upload to restart.")
