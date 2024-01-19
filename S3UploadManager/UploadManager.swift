@@ -26,10 +26,11 @@ class UploadManager: NSObject {
     private var currentUploadTask: URLSessionUploadTask?
     private var currentUploadRequest: URLRequest?
     private var currentUploadFileURL: URL?
-    private var currentDataChunk: Data?
+    private var currentDataChunkUrl: URL?
     private var currentPart: Int = 0
     private var activePart: Int = 0
     private var chunkCount: Int?
+    private var chunks: [URL]?
     private var currentUploadCompletionHandler: ((Result<String?, Error>) -> Void)?
     private var uploadedMediaCount: Int = 0
     private var parts: [Part] = []
@@ -117,13 +118,13 @@ class UploadManager: NSObject {
         }
     }
     
-    func uploadChunk(to preSignedUrl: URL, data: Data, mimeType: String, completion: @escaping (Result<String?, Error>) -> Void) {
+    func uploadChunk(to preSignedUrl: URL, chunkFile: URL, mimeType: String, completion: @escaping (Result<String?, Error>) -> Void) {
             var request = URLRequest(url: preSignedUrl)
             request.httpMethod = "PUT"
-            request.httpBody = data
+//            request.httpBody = data
             request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
 
-            let task = backgroundSession.uploadTask(with: request, from: data)
+            let task = backgroundSession.uploadTask(with: request, fromFile: chunkFile)
             completionHandlers[.uploadMedia, default: [:]][task.taskIdentifier] = { [weak self] result in
                 switch result {
                 case .success(_):
@@ -147,7 +148,7 @@ class UploadManager: NSObject {
             
             currentUploadTask = task
             currentUploadRequest = request
-            currentDataChunk = data
+            currentDataChunkUrl = chunkFile
             currentUploadCompletionHandler = completion
             task.resume()
     }
@@ -350,7 +351,9 @@ extension UploadManager: URLSessionTaskDelegate {
                         // After handling completion
                         handleCompleteMultipartUploadResponse(httpResponse, responseData: responseData)
                         DispatchQueue.main.async { [weak self] in
+                            self?.removeDataChunks(chunksUrls: (self?.retrieveURLs())!)
                             self?.removeTemporaryFile(fileURL: (self?.uploadData.mediaUrl!)!)
+                            self?.clearCustomUserDefaults()
                             self?.isUploading = false
                             self?.startNextUploadTask()
                         }
@@ -360,7 +363,6 @@ extension UploadManager: URLSessionTaskDelegate {
                     // Handle other HTTP responses
                     completion(.failure(URLError(.badServerResponse)))
                 }
-                
                 // Clean up after handling completion
                 completionHandlers[taskType]?.removeValue(forKey: task.taskIdentifier)
                 taskInfoMap.removeValue(forKey: task.taskIdentifier)
@@ -415,7 +417,7 @@ extension UploadManager: URLSessionTaskDelegate {
         }
     }
 
-    private func uploadChunksSequentially(presignedUrls: [PreSignedURLResponse.Part], chunks: [Data], currentChunk: Int) {
+    private func uploadChunksSequentially(presignedUrls: [PreSignedURLResponse.Part], chunks: [URL], currentChunk: Int) {
         if currentChunk >= presignedUrls.count {
             // All chunks are uploaded
             print("All chunks uploaded successfully")
@@ -433,11 +435,11 @@ extension UploadManager: URLSessionTaskDelegate {
             print("Failed to encode parts: \(error)")
 
         }
-        defaults.setValue(chunks, forKey: "ActiveChunks")
+        defaults.set(chunks.map { $0.absoluteString }, forKey: "ActiveChunks")
         defaults.setValue(currentChunk, forKey: "CurrentChunk")
         
         self.delegate?.uploadStatus(self, uploadComplete: true)
-        self.uploadChunk(to: URL(string: part.signedUrl)!, data: chunkData, mimeType: self.uploadData.mimeType!) { [weak self] response in
+        self.uploadChunk(to: URL(string: part.signedUrl)!, chunkFile: chunkData, mimeType: self.uploadData.mimeType!) { [weak self] response in
             switch response {
             case .success(_):
                 print("Chunk \(self?.activePart ?? 0) upload success")
@@ -446,7 +448,7 @@ extension UploadManager: URLSessionTaskDelegate {
                 self?.delegate?.activeMediaProgress(self!, didUpdateProgress: Float(currentChunk + 1) / Float(chunks.count))
 
             case .failure(let error):
-                print("Error uploading chunk \(self?.activePart ?? 0): \(error)")
+                print("Error uploading chunk \(self?.activePart ?? 0)")
             }
         }
     }
@@ -461,11 +463,18 @@ extension UploadManager: URLSessionTaskDelegate {
             do {
                 let storedParts = try JSONDecoder().decode([PreSignedURLResponse.Part].self, from: storedData)
                 print("Resumed")
-                uploadChunksSequentially(presignedUrls: storedParts, chunks: defaults.array(forKey: "ActiveChunks") as! [Data] , currentChunk: defaults.integer(forKey: "CurrentChunk"))
+                uploadChunksSequentially(presignedUrls: storedParts, chunks: retrieveURLs() , currentChunk: defaults.integer(forKey: "CurrentChunk"))
             } catch {
                 print("Failed to decode parts: \(error)")
             }
         }
+    }
+    
+    func retrieveURLs() -> [URL] {
+        guard let urlStrings = UserDefaults.standard.array(forKey: "ActiveChunks") as? [String] else {
+            return []
+        }
+        return urlStrings.compactMap { URL(string: $0) }
     }
 
 
@@ -537,6 +546,30 @@ extension UploadManager: URLSessionTaskDelegate {
             print("File does not exist, no need to delete: \(fileURL)")
         }
     }
+    
+    private func removeDataChunks(chunksUrls: [URL]) {
+        let fileManager = FileManager.default
+        chunksUrls.forEach { chunk in
+            if fileManager.fileExists(atPath: chunk.path) {
+                do {
+                    try fileManager.removeItem(at: chunk)
+                        print("Chunk Removed : \(chunk)")
+                } catch {
+                    print("Failed to remove temporary file: \(error)")
+                }
+            } else {
+                print("File does not exist, no need to delete: \(chunk)")
+            }
+        }
+    }
+    
+    func clearCustomUserDefaults() {
+        let defaults = UserDefaults.standard // or your custom UserDefaults
+        if Bundle.main.bundleIdentifier != nil {
+            defaults.removePersistentDomain(forName: "com.xtractor.S3UploadManager")
+            defaults.synchronize() // Optional, ensures the changes are saved immediately
+        }
+    }
 }
 
 
@@ -578,7 +611,7 @@ extension UploadManager {
         cancelCurrentUploadTask()
         initializeSession(forBackground: true)
         print("App moved to background")
-        restartCurrentUpload()
+//        restartCurrentUpload()
     }
 
     private func switchToForegroundSession() {
@@ -586,7 +619,7 @@ extension UploadManager {
         cancelCurrentUploadTask()
         initializeSession(forBackground: false)
         print("App moved to foreground")
-        restartCurrentUpload()
+//        restartCurrentUpload()
     }
 }
 
@@ -615,23 +648,62 @@ extension UploadManager {
         currentUploadTask = nil
     }
     
-    func splitFileDataIntoChunks(fileData: Data, minimumChunkSizeMB: Int = 5) -> [Data] {
+//    func splitFileDataIntoChunks(fileData: Data, minimumChunkSizeMB: Int = 5) -> [Data] {
+//        let totalSize = fileData.count
+//        let minimumChunkSizeBytes = minimumChunkSizeMB * 1024 * 1024
+//        let numberOfChunks = max(1, Int(ceil(Double(totalSize) / Double(minimumChunkSizeBytes))))
+//        
+//        var chunks: [Data] = []
+//
+//        for i in 0..<numberOfChunks {
+//            let start = i * minimumChunkSizeBytes
+//            let end = (i == numberOfChunks - 1) ? totalSize : min(start + minimumChunkSizeBytes, totalSize)
+//            let chunk = fileData.subdata(in: start..<end)
+//            chunks.append(chunk)
+//        }
+//
+//        return chunks
+//    }
+
+    func splitFileDataIntoChunks(fileData: Data, minimumChunkSizeMB: Int = 5) -> [URL] {
         let totalSize = fileData.count
         let minimumChunkSizeBytes = minimumChunkSizeMB * 1024 * 1024
         let numberOfChunks = max(1, Int(ceil(Double(totalSize) / Double(minimumChunkSizeBytes))))
-        
-        var chunks: [Data] = []
+        var chunkUrls: [URL] = []
 
         for i in 0..<numberOfChunks {
             let start = i * minimumChunkSizeBytes
             let end = (i == numberOfChunks - 1) ? totalSize : min(start + minimumChunkSizeBytes, totalSize)
             let chunk = fileData.subdata(in: start..<end)
-            chunks.append(chunk)
+
+            // Write the chunk to a temporary file
+            let tempFileURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            do {
+                try chunk.write(to: tempFileURL)
+                chunkUrls.append(tempFileURL)
+            } catch {
+                print("Error writing chunk to file: \(error)")
+            }
         }
 
-        return chunks
+        return chunkUrls
     }
 
+    func getFileSize(url: URL) -> Int64? {
+        let fileManager = FileManager.default
+        do {
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            if let fileSize = attributes[FileAttributeKey.size] as? Int64 {
+                return fileSize
+            } else {
+                print("File size attribute not found")
+                return nil
+            }
+        } catch {
+            print("Error getting file attributes: \(error)")
+            return nil
+        }
+    }
     
     func loadDataFromFileURL(fileURL: URL) -> Data? {
         do {
@@ -641,34 +713,6 @@ extension UploadManager {
             print("Error loading file data: \(error)")
             return nil
         }
-    }
-    
-    func restartCurrentUpload() {
-            guard let request = currentUploadRequest, let fileURL = currentUploadFileURL else {
-                print("No current upload to restart.")
-                return
-            }
-
-            // Create a new task with the same request and file URL
-            let newTask = backgroundSession.uploadTask(with: request, fromFile: fileURL)
-            completionHandlers[.uploadMedia, default: [:]][newTask.taskIdentifier] = { [weak self] result in
-                switch result {
-                case .success(_):
-                    // Assuming the response data contains the ETag or similar information
-                    if let httpResponse = newTask.response as? HTTPURLResponse, 200...299 ~= httpResponse.statusCode {
-                        let etag = httpResponse.allHeaderFields["Etag"] as? String
-                        self?.currentUploadCompletionHandler?(.success(etag))
-                    } else {
-                        self?.currentUploadCompletionHandler?(.failure(URLError(.badServerResponse)))
-                    }
-                case .failure(let error):
-                    self?.currentUploadCompletionHandler?(.failure(error))
-                }
-            }
-            
-//             Update the current upload task reference and resume
-            currentUploadTask = newTask
-            newTask.resume()
     }
 }
 

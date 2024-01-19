@@ -6,3 +6,11 @@
 //
 
 import Foundation
+
+protocol MutipartSynchronizerDelegate: AnyObject {
+    
+}
+
+class MultipartSynchronizer {
+    
+}
